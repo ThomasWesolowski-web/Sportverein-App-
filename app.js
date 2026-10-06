@@ -240,8 +240,7 @@ function dateBarHtml(k, actionPrefix = 'day') {
       <label class="date-label">
         ${fromKey(k).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}
         <small>${isToday ? 'Heute' : fromKey(k).getFullYear()} · Datum wählen</small>
-        <input type="date" class="visually-hidden-date" data-change="setDate" value="${k}"
-          style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none">
+        <input type="date" class="date-overlay" data-change="setDate" value="${k}" aria-label="Datum wählen">
       </label>
       <button class="nav-btn" data-action="${actionPrefix}Next" aria-label="Nächster Tag">›</button>
       ${isToday ? '' : '<button class="btn small" data-action="goToday">Heute</button>'}
@@ -385,7 +384,7 @@ const views = {
           <button class="nav-btn" data-action="monthPrev" aria-label="Vorheriger Monat">‹</button>
           <label class="date-label">${MONTHS[md.getMonth()]} ${md.getFullYear()}
             <small>Monat wählen</small>
-            <input type="month" data-change="setMonth" value="${ms.slice(0, 7)}" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none">
+            <input type="month" class="date-overlay" data-change="setMonth" value="${ms.slice(0, 7)}" aria-label="Monat wählen">
           </label>
           <button class="nav-btn" data-action="monthNext" aria-label="Nächster Monat">›</button>
         </div>
@@ -558,7 +557,8 @@ const views = {
         <p class="small muted" style="margin-top:0">Alle Daten werden lokal auf diesem Gerät gespeichert. Mit Export/Import kannst du sie sichern oder auf ein anderes Gerät übertragen.</p>
         <div class="btn-row">
           <button class="btn" data-action="exportData">⬇️ Exportieren</button>
-          <label class="btn">⬆️ Importieren<input type="file" accept="application/json,.json" data-change="importData" hidden></label>
+          <button class="btn" data-action="pasteImport">📋 Text importieren</button>
+          <label class="btn">⬆️ Datei importieren<input type="file" accept="application/json,.json" data-change="importData" hidden></label>
         </div>
         <div class="btn-row"><button class="btn danger" data-action="resetData">Beispieldaten wiederherstellen</button></div>
       </div>
@@ -578,8 +578,23 @@ function trainingsSummary(teamId) {
 function notFound() { return '<div class="empty">Nicht gefunden. <a href="#/">Zur Startseite</a></div>'; }
 
 /* ---------- Router ---------- */
+/* Navigation intern speichern; die Adresszeile wird nur genutzt, wenn der Browser das erlaubt
+   (in eingebetteten Ansichten ist sie oft gesperrt) – so funktioniert auch „Zurück“ am Handy. */
+const routeFromHash = () => (location.hash.startsWith('#/') ? location.hash.slice(1) : '/');
+let route = routeFromHash();
+function go(path) {
+  if (!$('#sheet').hidden) closeSheet();
+  route = path.replace(/^#/, '') || '/';
+  try { history.pushState({ route }, '', '#' + route); } catch (e) { /* nicht erlaubt – egal */ }
+  render(true);
+}
+window.addEventListener('popstate', ev => {
+  route = (ev.state && ev.state.route) || routeFromHash();
+  if (!$('#sheet').hidden) closeSheet();
+  render(true);
+});
 function parseRoute() {
-  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const parts = route.replace(/^\/?/, '').split('/').filter(Boolean);
   return { name: parts[0] || 'start', arg: parts[1] ? decodeURIComponent(parts[1]) : undefined };
 }
 function render(scrollTop = false) {
@@ -611,7 +626,6 @@ function scrollTimelines() {
     w.scrollLeft = Math.max(0, frac * track.clientWidth);
   });
 }
-window.addEventListener('hashchange', () => { if (!$('#sheet').hidden) closeSheet(); render(true); });
 
 /* ---------- Sheet & Toast ---------- */
 function openSheet(title, html, onMount) {
@@ -637,6 +651,59 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
 }
+
+/* ---------- Bestätigen & Eingabe (statt confirm/prompt) ---------- */
+const dialogEl = document.createElement('div');
+dialogEl.id = 'dialog';
+dialogEl.className = 'dialog-backdrop';
+dialogEl.hidden = true;
+dialogEl.innerHTML = `
+  <form class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialogMsg" novalidate>
+    <p class="dialog-msg" id="dialogMsg"></p>
+    <input class="input dialog-input" id="dialogInput" maxlength="40" autocomplete="off">
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-dlg="cancel">Abbrechen</button>
+      <button type="submit" class="btn primary" data-dlg="ok">OK</button>
+    </div>
+  </form>`;
+document.body.appendChild(dialogEl);
+let dialogResolve = null;
+
+/** Zeigt eine Rückfrage. Mit `input` wird ein Textfeld angezeigt und dessen Inhalt geliefert. */
+function ask(message, { ok = 'OK', danger = false, input = null } = {}) {
+  if (dialogResolve) dialogResolve(null);
+  const field = $('#dialogInput');
+  const okBtn = dialogEl.querySelector('[data-dlg="ok"]');
+  $('#dialogMsg').textContent = message;
+  okBtn.textContent = ok;
+  okBtn.className = danger ? 'btn danger-solid' : 'btn primary';
+  field.hidden = input === null;
+  field.value = input ?? '';
+  dialogEl.hidden = false;
+  (input === null ? okBtn : field).focus();
+  if (input !== null) field.select();
+  return new Promise(resolve => { dialogResolve = resolve; });
+}
+function closeDialog(result) {
+  dialogEl.hidden = true;
+  const r = dialogResolve;
+  dialogResolve = null;
+  if (r) r(result);
+}
+dialogEl.addEventListener('submit', ev => {
+  ev.preventDefault();
+  const field = $('#dialogInput');
+  closeDialog(field.hidden ? true : field.value);
+});
+/** Abbrechen liefert false (Rückfrage) bzw. null (Eingabe) */
+const cancelValue = () => ($('#dialogInput').hidden ? false : null);
+dialogEl.addEventListener('click', ev => {
+  if (ev.target === dialogEl || ev.target.closest('[data-dlg="cancel"]')) closeDialog(cancelValue());
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !dialogEl.hidden) { ev.stopImmediatePropagation(); closeDialog(cancelValue()); }
+}, true);
+const confirmAsk = (message, opts) => ask(message, opts).then(r => r === true);
 
 /* ---------- Formulare ---------- */
 function facilityOptions(selected) {
@@ -742,7 +809,7 @@ function openEventForm(ev = null, prefill = {}) {
         date: f.date.value, start: f.start.value, end: f.end.value };
     };
     wireBookingForm(form, build, false);
-    form.addEventListener('submit', sub => {
+    form.addEventListener('submit', async sub => {
       sub.preventDefault();
       const f = form.elements;
       const title = f.title.value.trim();
@@ -751,7 +818,7 @@ function openEventForm(ev = null, prefill = {}) {
         : validateTimes(f.start.value, f.end.value) || (!units.length ? 'Bitte mindestens einen Bereich wählen.' : '');
       if (err) { toast(err); return; }
       const conflicts = conflictsOn(build(), f.date.value);
-      if (conflicts.length && !confirm(`Es gibt ${conflicts.length} Überschneidung(en). Trotzdem speichern?`)) return;
+      if (conflicts.length && !(await confirmAsk(`Es gibt ${conflicts.length} Überschneidung(en) mit anderen Buchungen. Trotzdem speichern?`, { ok: 'Trotzdem speichern' }))) return;
       const rec = { id: e.id || uid(), title, type: f.type.value, teamId: f.teamId.value || null,
         facilityId: f.facilityId.value, unitIds: units, date: f.date.value, start: f.start.value, end: f.end.value, note: f.note.value.trim() };
       if (ev) Object.assign(ev, rec); else data.events.push(rec);
@@ -762,8 +829,8 @@ function openEventForm(ev = null, prefill = {}) {
       render();
       toast('✅ Termin gespeichert');
     });
-    form.querySelector('[data-action="deleteEvent"]')?.addEventListener('click', () => {
-      if (!confirm('Termin wirklich löschen?')) return;
+    form.querySelector('[data-action="deleteEvent"]')?.addEventListener('click', async () => {
+      if (!(await confirmAsk(`Termin „${ev.title}“ löschen?`, { ok: 'Löschen', danger: true }))) return;
       data.events = data.events.filter(x => x.id !== ev.id);
       save(); closeSheet(); render(); toast('🗑 Termin gelöscht');
     });
@@ -805,7 +872,7 @@ function openTrainingForm(tr = null, teamId = null) {
         unitIds: selectedUnits(form), start: f.start.value, end: f.end.value, validFrom: f.validFrom.value, validTo: f.validTo.value };
     };
     wireBookingForm(form, build, true);
-    form.addEventListener('submit', sub => {
+    form.addEventListener('submit', async sub => {
       sub.preventDefault();
       const f = form.elements;
       const units = selectedUnits(form);
@@ -813,15 +880,15 @@ function openTrainingForm(tr = null, teamId = null) {
         || (f.validFrom.value && f.validTo.value && f.validTo.value < f.validFrom.value ? '„Gültig bis“ liegt vor „Gültig ab“.' : '');
       if (err) { toast(err); return; }
       const conflicts = trainingConflicts(build());
-      if (conflicts.length && !confirm(`In den nächsten Wochen gibt es ${conflicts.length} Überschneidung(en). Trotzdem speichern?`)) return;
+      if (conflicts.length && !(await confirmAsk(`In den nächsten Wochen gibt es ${conflicts.length} Überschneidung(en). Trotzdem speichern?`, { ok: 'Trotzdem speichern' }))) return;
       const rec = { id: t.id || uid(), teamId: f.teamId.value, weekday: Number(f.weekday.value), start: f.start.value, end: f.end.value,
         facilityId: f.facilityId.value, unitIds: units, validFrom: f.validFrom.value || '', validTo: f.validTo.value || '',
         skipDates: t.skipDates || [] };
       if (tr) Object.assign(tr, rec); else data.trainings.push(rec);
       save(); closeSheet(); render(); toast('✅ Trainingszeit gespeichert');
     });
-    form.querySelector('[data-action="deleteTraining"]')?.addEventListener('click', () => {
-      if (!confirm('Diese Trainingszeit dauerhaft löschen?')) return;
+    form.querySelector('[data-action="deleteTraining"]')?.addEventListener('click', async () => {
+      if (!(await confirmAsk('Diese Trainingszeit dauerhaft löschen?', { ok: 'Löschen', danger: true }))) return;
       data.trainings = data.trainings.filter(x => x.id !== tr.id);
       save(); closeSheet(); render(); toast('🗑 Trainingszeit gelöscht');
     });
@@ -857,15 +924,15 @@ function openTeamForm(tm = null) {
       if (tm) Object.assign(tm, rec);
       else { rec.id = uid(); data.teams.push(rec); }
       save(); closeSheet();
-      if (!tm) location.hash = `#/team/${rec.id}`; else render();
+      if (!tm) go(`/team/${rec.id}`); else render();
       toast('✅ Mannschaft gespeichert');
     });
-    form.querySelector('[data-action="deleteTeam"]')?.addEventListener('click', () => {
-      if (!confirm(`„${tm.name}“ inkl. aller Trainingszeiten löschen? Termine bleiben ohne Mannschaft erhalten.`)) return;
+    form.querySelector('[data-action="deleteTeam"]')?.addEventListener('click', async () => {
+      if (!(await confirmAsk(`„${tm.name}“ inkl. aller Trainingszeiten löschen? Termine bleiben ohne Mannschaft erhalten.`, { ok: 'Löschen', danger: true }))) return;
       data.teams = data.teams.filter(x => x.id !== tm.id);
       data.trainings = data.trainings.filter(x => x.teamId !== tm.id);
       data.events.forEach(e => { if (e.teamId === tm.id) e.teamId = null; });
-      save(); closeSheet(); location.hash = '#/teams'; toast('🗑 Mannschaft gelöscht');
+      save(); closeSheet(); go('/teams'); toast('🗑 Mannschaft gelöscht');
     });
   });
 }
@@ -898,17 +965,17 @@ function openFacilityForm(fa = null) {
         const names = (el.units.value || '').split(',').map(s => s.trim()).filter(Boolean);
         rec.units = (names.length ? names : ['Gesamt']).map(name => ({ id: uid(), name }));
         data.facilities.push(rec);
-        save(); closeSheet(); location.hash = `#/anlage/${rec.id}`;
+        save(); closeSheet(); go(`/anlage/${rec.id}`);
       }
       toast('✅ Anlage gespeichert');
     });
-    form.querySelector('[data-action="deleteFacility"]')?.addEventListener('click', () => {
+    form.querySelector('[data-action="deleteFacility"]')?.addEventListener('click', async () => {
       const used = data.trainings.filter(t => t.facilityId === fa.id).length + data.events.filter(e => e.facilityId === fa.id).length;
-      if (!confirm(`„${fa.name}“ löschen?${used ? ` ${used} Training(s)/Termin(e) auf dieser Anlage werden ebenfalls gelöscht.` : ''}`)) return;
+      if (!(await confirmAsk(`„${fa.name}“ löschen?${used ? ` ${used} Training(s)/Termin(e) auf dieser Anlage werden ebenfalls gelöscht.` : ''}`, { ok: 'Löschen', danger: true }))) return;
       data.facilities = data.facilities.filter(x => x.id !== fa.id);
       data.trainings = data.trainings.filter(t => t.facilityId !== fa.id);
       data.events = data.events.filter(e => e.facilityId !== fa.id);
-      save(); closeSheet(); location.hash = '#/anlagen'; toast('🗑 Anlage gelöscht');
+      save(); closeSheet(); go('/anlagen'); toast('🗑 Anlage gelöscht');
     });
   });
 }
@@ -994,25 +1061,25 @@ const actions = {
     el.closest('form')._refresh?.();
   },
 
-  addUnit: el => {
+  addUnit: async el => {
     const f = facility(el.dataset.fac);
-    const name = prompt('Name des neuen Bereichs (z. B. „Feld 4“, „Umkleide“):');
+    const name = await ask('Name des neuen Bereichs (z. B. „Feld 4“, „Umkleide“):', { ok: 'Hinzufügen', input: '' });
     if (!name || !name.trim()) return;
     f.units.push({ id: uid(), name: name.trim() });
     save(); render(); toast('✅ Bereich hinzugefügt');
   },
-  renameUnit: el => {
+  renameUnit: async el => {
     const u = facility(el.dataset.fac).units.find(x => x.id === el.dataset.unit);
-    const name = prompt('Neuer Name:', u.name);
+    const name = await ask(`Neuer Name für „${u.name}“:`, { ok: 'Umbenennen', input: u.name });
     if (!name || !name.trim()) return;
     u.name = name.trim();
     save(); render();
   },
-  deleteUnit: el => {
+  deleteUnit: async el => {
     const f = facility(el.dataset.fac);
     const u = f.units.find(x => x.id === el.dataset.unit);
     if (f.units.length <= 1) { toast('Eine Anlage braucht mindestens einen Bereich.'); return; }
-    if (!confirm(`Bereich „${u.name}“ löschen? Buchungen, die nur diesen Bereich betreffen, werden entfernt.`)) return;
+    if (!(await confirmAsk(`Bereich „${u.name}“ löschen? Buchungen, die nur diesen Bereich betreffen, werden entfernt.`, { ok: 'Löschen', danger: true }))) return;
     f.units = f.units.filter(x => x.id !== u.id);
     const strip = list => list.filter(x => {
       if (x.facilityId !== f.id) return true;
@@ -1051,6 +1118,24 @@ const actions = {
   kindFilter: el => { state.kindFilter = el.dataset.kind; render(); },
 
   exportData: () => {
+    const json = JSON.stringify(data, null, 2);
+    openSheet('Daten exportieren', `
+      <p class="small muted" style="margin-top:0">Sicherung aller Mannschaften, Anlagen, Trainingszeiten und Termine.
+        Den Text kopieren und z. B. in einer Notiz oder Mail speichern${window.SV_ARTIFACT ? '' : ' – oder als Datei herunterladen'}.</p>
+      <textarea class="input export-text" id="exportText" readonly rows="8">${esc(json)}</textarea>
+      <div class="btn-row">
+        <button class="btn primary" data-action="copyExport">📋 Text kopieren</button>
+        ${window.SV_ARTIFACT ? '' : '<button class="btn" data-action="downloadExport">⬇️ Als Datei</button>'}
+      </div>`);
+  },
+  copyExport: () => {
+    const area = $('#exportText');
+    const fallback = () => { area.focus(); area.select(); toast('Text ist markiert – jetzt kopieren (Strg+C bzw. lange tippen)'); };
+    try {
+      navigator.clipboard.writeText(area.value).then(() => toast('✅ In die Zwischenablage kopiert'), fallback);
+    } catch (e) { fallback(); }
+  },
+  downloadExport: () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -1059,12 +1144,36 @@ const actions = {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Download gestartet – falls nichts passiert, bitte „Text kopieren“ nutzen');
   },
-  resetData: () => {
-    if (!confirm('Alle eigenen Änderungen verwerfen und Beispieldaten laden?')) return;
-    data = demoData(); save(); location.hash = '#/'; render(); toast('Beispieldaten geladen');
+  pasteImport: () => {
+    openSheet('Daten importieren', `
+      <p class="small muted" style="margin-top:0">Exportierten Text hier einfügen. Die aktuellen Daten auf diesem Gerät werden ersetzt.</p>
+      <textarea class="input export-text" id="importText" rows="8" placeholder="{ &quot;teams&quot;: … }"></textarea>
+      <div class="btn-row"><button class="btn primary" data-action="runPasteImport">Importieren</button></div>`);
+    $('#importText').focus();
+  },
+  runPasteImport: () => importJson($('#importText').value),
+  resetData: async () => {
+    if (!(await confirmAsk('Alle eigenen Änderungen verwerfen und Beispieldaten laden?', { ok: 'Beispieldaten laden', danger: true }))) return;
+    data = demoData(); save(); go('/'); toast('Beispieldaten geladen');
   },
 };
+
+async function importJson(txt) {
+  let d;
+  try { d = JSON.parse(txt); } catch (e) { d = null; }
+  if (!d || !Array.isArray(d.teams) || !Array.isArray(d.facilities)) {
+    toast('⚠️ Das ist keine gültige Sicherung der Sportverein-App');
+    return;
+  }
+  if (!(await confirmAsk('Aktuelle Daten auf diesem Gerät durch den Import ersetzen?', { ok: 'Importieren', danger: true }))) return;
+  data = normalize(d);
+  save();
+  closeSheet();
+  render();
+  toast('✅ Daten importiert');
+}
 
 const changeHandlers = {
   setDate: el => { if (el.value) setDate(el.value); },
@@ -1072,17 +1181,18 @@ const changeHandlers = {
   clubName: el => { data.club.name = el.value.trim() || 'Sportverein'; save(); $('#clubName').textContent = data.club.name; toast('✅ Gespeichert'); },
   importData: el => {
     const file = el.files[0];
-    if (!file) return;
-    file.text().then(txt => {
-      const d = JSON.parse(txt);
-      if (!d || !Array.isArray(d.teams) || !Array.isArray(d.facilities)) throw new Error('Format');
-      if (!confirm('Aktuelle Daten durch den Import ersetzen?')) return;
-      data = normalize(d); save(); render(); toast('✅ Daten importiert');
-    }).catch(() => toast('⚠️ Datei konnte nicht gelesen werden'));
+    el.value = '';
+    if (file) file.text().then(importJson, () => toast('⚠️ Datei konnte nicht gelesen werden'));
   },
 };
 
 document.addEventListener('click', ev => {
+  const link = ev.target.closest('a[href^="#/"]');
+  if (link) {
+    ev.preventDefault();
+    go(link.getAttribute('href').slice(1));
+    return;
+  }
   const el = ev.target.closest('[data-action]');
   if (!el) return;
   const fn = actions[el.dataset.action];
@@ -1094,12 +1204,11 @@ document.addEventListener('change', ev => {
   const el = ev.target.closest('[data-change]');
   if (el && changeHandlers[el.dataset.change]) changeHandlers[el.dataset.change](el);
 });
-// Klick auf Datumsbeschriftung öffnet den nativen Datumswähler
+// Datumsfeld liegt unsichtbar über der Beschriftung: Handys öffnen den Wähler selbst,
+// am PC hilft showPicker() nach (wo erlaubt)
 document.addEventListener('click', ev => {
-  const label = ev.target.closest('.date-label');
-  if (!label) return;
-  const input = label.querySelector('input');
-  if (input && typeof input.showPicker === 'function') { ev.preventDefault(); try { input.showPicker(); } catch (e) { input.focus(); } }
+  const input = ev.target.closest('.date-overlay');
+  if (input && typeof input.showPicker === 'function') { try { input.showPicker(); } catch (e) { /* nicht erlaubt */ } }
 });
 
 // Uhrzeit-Markierung / Status regelmäßig aktualisieren

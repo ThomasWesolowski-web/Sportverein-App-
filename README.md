@@ -42,6 +42,12 @@ Die Daten werden lokal im Browser (`localStorage`) des jeweiligen Geräts gespei
 Beim ersten Start werden Beispieldaten geladen; unter ⚙️ Einstellungen lassen sie sich
 zurücksetzen, exportieren und importieren.
 
+## Testversion als claude.ai-Link
+
+`python3 tools/build-artifact.py` baut aus `index.html`, `styles.css` und `app.js` eine
+einzelne Datei `dist/sportverein-app.html`, die als privater claude.ai-Link (Artifact)
+veröffentlicht werden kann – praktisch zum Testen auf dem Handy.
+
 ## Nebenprojekt: Server-Version
 
 Eine Version mit gemeinsamer Datenbank, Anmeldung und Rollen (Admin, Trainer, Mitglied)
