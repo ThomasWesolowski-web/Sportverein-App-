@@ -1,6 +1,6 @@
 // Service Worker: macht die App offline nutzbar (Netz zuerst, Cache als Fallback)
-const CACHE = 'sportverein-v2';
-const ASSETS = ['./', './index.html', './styles.css', './app.js', './demo.js', './manifest.webmanifest', './icon.svg'];
+const CACHE = 'sportverein-v1';
+const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -13,9 +13,7 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // API-Anfragen nie zwischenspeichern (Vereinsdaten, Anmeldung)
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then(res => {

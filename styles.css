@@ -137,7 +137,7 @@ h1, h2, h3 { line-height: 1.2; margin: 0; }
 .btn.primary:hover { filter: brightness(1.05); }
 .btn.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
 .btn.small { min-height: 36px; padding: 0 12px; font-size: 14px; }
-.btn.wide { width: 100%; }
+.btn.block { width: 100%; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .btn-row .btn { flex: 1 1 140px; }
 
@@ -325,15 +325,3 @@ input[type="color"].input { padding: 4px; height: 46px; }
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px;
   box-shadow: var(--shadow); max-width: calc(100% - 32px);
 }
-
-/* ---------- Anmeldung / Rechte ---------- */
-body.logged-out .bottom-nav,
-body.logged-out .header-actions,
-body.readonly .app-header [data-action="newEvent"] { display: none; }
-body.logged-out .view { padding-bottom: 32px; }
-.login-card { max-width: 420px; margin: 24px auto 0; text-align: center; }
-.login-card .form { text-align: left; margin: 18px 0 14px; }
-.login-card h1 { font-size: 22px; margin-bottom: 6px; }
-.login-card p { margin: 0; }
-.login-logo { font-size: 48px; margin-bottom: 6px; }
-.btn:disabled { opacity: .6; cursor: progress; }
