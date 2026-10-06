@@ -308,6 +308,7 @@ input[type="color"].input { padding: 4px; height: 46px; }
 .alert { border-radius: 12px; padding: 10px 12px; font-size: 14px; }
 .alert.warn { background: var(--warn-bg); color: var(--warn); }
 .alert.ok { background: var(--primary-soft); color: var(--ok); }
+.alert.danger { background: var(--danger-soft); color: var(--danger); }
 .alert ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* ---------- Bottom-Sheet ---------- */
@@ -384,3 +385,4 @@ input[type="color"].input { padding: 4px; height: 46px; }
 .export-text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; min-height: 160px; }
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+.dialog-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }

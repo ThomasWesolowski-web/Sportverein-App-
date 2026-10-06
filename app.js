@@ -82,7 +82,7 @@ function demoData() {
       { id: 't6', teamId: 'bb',    weekday: 4, start: '18:30', end: '20:30', facilityId: 'h1', unitIds: ['h1-1', 'h1-2'] },
       { id: 't7', teamId: 'kendo', weekday: 2, start: '19:00', end: '21:00', facilityId: 'h2', unitIds: ['h2-1', 'h2-2'] },
       { id: 't8', teamId: 'kendo', weekday: 5, start: '18:00', end: '20:00', facilityId: 'h2', unitIds: ['h2-1'] },
-      { id: 't9', teamId: 'kendo', weekday: 6, start: '10:00', end: '12:00', facilityId: 'h2', unitIds: ['h2-1', 'h2-2'] },
+      { id: 't9', teamId: 'kendo', weekday: 6, start: '10:00', end: '12:00', facilityId: 'h2', unitIds: ['h2-1', 'h2-2'], skipDates: [addDays(sat, 7)] },
     ],
     events: [
       { id: 'e1', title: 'Heimspiel vs. FC Musterdorf', type: 'spiel', teamId: 'fb1', facilityId: 'p1', unitIds: ['p1-1', 'p1-2'], date: sun, start: '15:00', end: '17:00', note: 'Kreisliga A, 9. Spieltag' },
@@ -188,15 +188,27 @@ const sameEntry = (a, b) => a.kind === b.kind && a.id === b.id;
 function conflictsOn(cand, k) {
   return entriesForDate(k).filter(e => !sameEntry(e, cand) && overlaps(cand, e));
 }
-/** Konflikte für ein wiederkehrendes Training in den nächsten Wochen */
-function trainingConflicts(cand, weeks = 12) {
-  let k = todayKey();
-  if (cand.validFrom && cand.validFrom > k) k = cand.validFrom;
-  k = addDays(k, (cand.weekday - weekdayOf(k) + 7) % 7);
+/** Konflikte einer festen Trainingszeit: mit anderen festen Trainings (gleicher Wochentag,
+    überlappender Gültigkeitszeitraum) und mit allen künftigen Terminen an diesem Wochentag */
+function trainingConflicts(cand) {
+  const today = todayKey();
+  const from = cand.validFrom && cand.validFrom > today ? cand.validFrom : today;
+  const to = cand.validTo || '9999-12-31';
+  if (to < from) return [];
+  const skip = new Set(cand.skipDates || []);
+  const clashes = x => x.facilityId === cand.facilityId &&
+    toMin(cand.start) < toMin(x.end) && toMin(x.start) < toMin(cand.end) &&
+    x.unitIds.some(u => cand.unitIds.includes(u));
   const found = [];
-  for (let i = 0; i < weeks; i++, k = addDays(k, 7)) {
-    if (cand.validTo && k > cand.validTo) break;
-    conflictsOn({ ...cand, date: k }, k).forEach(c => found.push(c));
+  for (const t of data.trainings) {
+    if (t.id === cand.id || t.weekday !== cand.weekday || !clashes(t)) continue;
+    if ((t.validTo || '9999-12-31') < from || (t.validFrom || '0000-01-01') > to) continue;
+    found.push({ kind: 'training', id: t.id, type: 'training', teamId: t.teamId, facilityId: t.facilityId,
+      unitIds: t.unitIds, start: t.start, end: t.end, weekday: t.weekday });
+  }
+  for (const e of data.events) {
+    if (e.date < from || e.date > to || weekdayOf(e.date) !== cand.weekday || skip.has(e.date) || !clashes(e)) continue;
+    found.push({ kind: 'event', ...e });
   }
   return found;
 }
@@ -478,7 +490,7 @@ const views = {
             <div class="grow">
               <div><b>${WD_LONG[x.weekday - 1]}</b> · ${x.start}–${x.end}</div>
               <div class="small muted">📍 ${esc(placeLabel(x))}${x.validFrom || x.validTo ? ` · gültig ${x.validFrom ? 'ab ' + fmtShort(x.validFrom) : ''} ${x.validTo ? 'bis ' + fmtShort(x.validTo) : ''}` : ''}</div>
-              ${trainingConflicts({ kind: 'training', ...x }).length ? '<span class="tag warn">⚠️ Überschneidung in den nächsten Wochen</span>' : ''}
+              ${trainingConflicts({ kind: 'training', ...x }).length ? '<span class="tag warn">⚠️ Überschneidung</span>' : ''}
             </div>
             <div class="actions"><button class="btn small" data-action="editTraining" data-id="${x.id}">Ändern</button></div>
           </div>`).join('')}</div>` : '<div class="empty">Noch keine Trainingszeiten</div>'}
@@ -660,6 +672,7 @@ dialogEl.hidden = true;
 dialogEl.innerHTML = `
   <form class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dialogMsg" novalidate>
     <p class="dialog-msg" id="dialogMsg"></p>
+    <ul class="dialog-list" id="dialogList" hidden></ul>
     <input class="input dialog-input" id="dialogInput" maxlength="40" autocomplete="off">
     <div class="dialog-actions">
       <button type="button" class="btn" data-dlg="cancel">Abbrechen</button>
@@ -670,7 +683,7 @@ document.body.appendChild(dialogEl);
 let dialogResolve = null;
 
 /** Zeigt eine Rückfrage. Mit `input` wird ein Textfeld angezeigt und dessen Inhalt geliefert. */
-function ask(message, { ok = 'OK', danger = false, input = null } = {}) {
+function ask(message, { ok = 'OK', danger = false, input = null, cancel = true, list = null } = {}) {
   if (dialogResolve) dialogResolve(null);
   const field = $('#dialogInput');
   const okBtn = dialogEl.querySelector('[data-dlg="ok"]');
@@ -678,6 +691,10 @@ function ask(message, { ok = 'OK', danger = false, input = null } = {}) {
   okBtn.textContent = ok;
   okBtn.className = danger ? 'btn danger-solid' : 'btn primary';
   field.hidden = input === null;
+  dialogEl.querySelector('[data-dlg="cancel"]').hidden = !cancel;
+  const ul = $('#dialogList');
+  ul.hidden = !list || !list.length;
+  ul.innerHTML = (list || []).map(l => `<li>${esc(l)}</li>`).join('');
   field.value = input ?? '';
   dialogEl.hidden = false;
   (input === null ? okBtn : field).focus();
@@ -728,13 +745,26 @@ function teamOptions(selected, allowNone = true) {
   return (allowNone ? '<option value="">– keine –</option>' : '') +
     data.teams.map(t => `<option value="${t.id}" ${t.id === selected ? 'selected' : ''}>${esc(t.icon)} ${esc(t.name)}</option>`).join('');
 }
-function conflictBox(conflicts, multi = false) {
-  if (!conflicts.length) return '<div class="alert ok">✅ Keine Überschneidungen</div>';
+/** Lesbare Zeilen zu Überschneidungen, z. B. „Sa. 17.10., 10:00–12:00 Training Kendo (komplett)“ */
+function conflictLines(conflicts) {
   const seen = new Set();
-  const items = conflicts.filter(c => { const key = c.kind + c.id + c.date; if (seen.has(key)) return false; seen.add(key); return true; })
-    .slice(0, 6)
-    .map(c => `<li>${multi ? fmtShort(c.date) + ', ' : ''}${c.start}–${c.end} ${esc(entryTitle(c))} (${esc(unitsLabel(c.facilityId, c.unitIds))})</li>`).join('');
-  return `<div class="alert warn">⚠️ Überschneidung mit:<ul>${items}</ul></div>`;
+  return conflicts
+    .filter(c => { const key = c.kind + c.id + (c.date || ''); if (seen.has(key)) return false; seen.add(key); return true; })
+    .map(c => `${c.date ? fmtShort(c.date) : 'jeden ' + WD_LONG[c.weekday - 1]}, ${c.start}–${c.end} ${entryTitle(c)} (${unitsLabel(c.facilityId, c.unitIds)})`);
+}
+/** mode "form": neue/geänderte Buchung (wird blockiert), "existing": bereits gespeicherte Überschneidung */
+function conflictBox(conflicts, mode = 'form') {
+  if (!conflicts.length) return mode === 'form' ? '<div class="alert ok">✅ Frei – keine Überschneidungen</div>' : '';
+  const lines = conflictLines(conflicts);
+  const list = `<ul>${lines.slice(0, 6).map(l => `<li>${esc(l)}</li>`).join('')}${lines.length > 6 ? `<li>… und ${lines.length - 6} weitere</li>` : ''}</ul>`;
+  return mode === 'form'
+    ? `<div class="alert danger">⛔ <b>Nicht buchbar</b> – dieser Bereich ist schon belegt:${list}Bitte andere Zeit, anderen Bereich oder andere Anlage wählen.</div>`
+    : `<div class="alert warn">⚠️ Überschneidung mit:${list}Bitte einen der Termine verschieben oder das Training an diesem Tag absagen.</div>`;
+}
+/** Hinweis-Popup, wenn eine Buchung wegen Überschneidung nicht möglich ist */
+function blockedNotice(conflicts, what = 'Diese Buchung') {
+  return ask(`${what} ist nicht möglich, weil der Bereich zu dieser Zeit schon belegt ist:`,
+    { ok: 'Verstanden', cancel: false, list: conflictLines(conflicts).slice(0, 8) });
 }
 
 /** Wiring für Anlage/Bereich-Auswahl + Live-Konfliktprüfung */
@@ -750,7 +780,7 @@ function wireBookingForm(form, buildCandidate, multi) {
     }
     const c = buildCandidate();
     if (!c || !c.unitIds.length || !c.start || !c.end || toMin(c.end) <= toMin(c.start)) { box.innerHTML = ''; return; }
-    box.innerHTML = conflictBox(multi ? trainingConflicts(c) : conflictsOn(c, c.date), multi);
+    box.innerHTML = conflictBox(multi ? trainingConflicts(c) : conflictsOn(c, c.date));
   };
   facSel.addEventListener('change', () => {
     const f = facility(facSel.value);
@@ -818,7 +848,7 @@ function openEventForm(ev = null, prefill = {}) {
         : validateTimes(f.start.value, f.end.value) || (!units.length ? 'Bitte mindestens einen Bereich wählen.' : '');
       if (err) { toast(err); return; }
       const conflicts = conflictsOn(build(), f.date.value);
-      if (conflicts.length && !(await confirmAsk(`Es gibt ${conflicts.length} Überschneidung(en) mit anderen Buchungen. Trotzdem speichern?`, { ok: 'Trotzdem speichern' }))) return;
+      if (conflicts.length) { await blockedNotice(conflicts, 'Dieser Termin'); return; }
       const rec = { id: e.id || uid(), title, type: f.type.value, teamId: f.teamId.value || null,
         facilityId: f.facilityId.value, unitIds: units, date: f.date.value, start: f.start.value, end: f.end.value, note: f.note.value.trim() };
       if (ev) Object.assign(ev, rec); else data.events.push(rec);
@@ -858,7 +888,7 @@ function openTrainingForm(tr = null, teamId = null) {
         <label class="field"><span>Gültig ab (optional)</span><input class="input" type="date" name="validFrom" value="${t.validFrom || ''}"></label>
         <label class="field"><span>Gültig bis (optional)</span><input class="input" type="date" name="validTo" value="${t.validTo || ''}"></label>
       </div>
-      <p class="small muted" style="margin:0">Konfliktprüfung für die nächsten 12 Wochen:</p>
+      <p class="small muted" style="margin:0">Prüfung gegen alle festen Trainings und künftigen Termine:</p>
       <div class="conflict-box"></div>
       <div class="btn-row">
         ${tr ? '<button type="button" class="btn danger" data-action="deleteTraining">Löschen</button>' : ''}
@@ -869,7 +899,8 @@ function openTrainingForm(tr = null, teamId = null) {
     const build = () => {
       const f = form.elements;
       return { kind: 'training', id: t.id || '__new', weekday: Number(f.weekday.value), facilityId: f.facilityId.value,
-        unitIds: selectedUnits(form), start: f.start.value, end: f.end.value, validFrom: f.validFrom.value, validTo: f.validTo.value };
+        unitIds: selectedUnits(form), start: f.start.value, end: f.end.value, validFrom: f.validFrom.value, validTo: f.validTo.value,
+        skipDates: t.skipDates || [] };
     };
     wireBookingForm(form, build, true);
     form.addEventListener('submit', async sub => {
@@ -880,7 +911,7 @@ function openTrainingForm(tr = null, teamId = null) {
         || (f.validFrom.value && f.validTo.value && f.validTo.value < f.validFrom.value ? '„Gültig bis“ liegt vor „Gültig ab“.' : '');
       if (err) { toast(err); return; }
       const conflicts = trainingConflicts(build());
-      if (conflicts.length && !(await confirmAsk(`In den nächsten Wochen gibt es ${conflicts.length} Überschneidung(en). Trotzdem speichern?`, { ok: 'Trotzdem speichern' }))) return;
+      if (conflicts.length) { await blockedNotice(conflicts, 'Diese Trainingszeit'); return; }
       const rec = { id: t.id || uid(), teamId: f.teamId.value, weekday: Number(f.weekday.value), start: f.start.value, end: f.end.value,
         facilityId: f.facilityId.value, unitIds: units, validFrom: f.validFrom.value || '', validTo: f.validTo.value || '',
         skipDates: t.skipDates || [] };
@@ -995,7 +1026,7 @@ function openEntrySheet(kind, id, date) {
       ${entry.note ? `<div><span>📝</span><span>${esc(entry.note)}</span></div>` : ''}
       ${entry.cancelled ? '<div><span>❌</span><span class="tag danger">Dieser Termin fällt aus</span></div>' : ''}
     </div>
-    ${conflicts.length ? `<div style="margin-top:14px">${conflictBox(conflicts)}</div>` : ''}
+    ${conflicts.length ? `<div style="margin-top:14px">${conflictBox(conflicts, 'existing')}</div>` : ''}
     <div class="btn-row">
       ${kind === 'event'
         ? `<button class="btn" data-action="editEvent" data-id="${esc(id)}">Bearbeiten</button>
@@ -1043,7 +1074,12 @@ const actions = {
     t.skipDates = t.skipDates || [];
     const d = el.dataset.date;
     const i = t.skipDates.indexOf(d);
-    if (i >= 0) t.skipDates.splice(i, 1); else t.skipDates.push(d);
+    if (i >= 0) {
+      // Wieder stattfinden lassen nur, wenn der Bereich inzwischen nicht anders belegt ist
+      const conflicts = conflictsOn({ kind: 'training', id: t.id, facilityId: t.facilityId, unitIds: t.unitIds, start: t.start, end: t.end }, d);
+      if (conflicts.length) { blockedNotice(conflicts, 'Das Training wieder stattfinden zu lassen'); return; }
+      t.skipDates.splice(i, 1);
+    } else t.skipDates.push(d);
     save(); closeSheet(); render();
     toast(i >= 0 ? '↩️ Training findet wieder statt' : '❌ Training abgesagt');
   },
