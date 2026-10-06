@@ -1,0 +1,18 @@
+services:
+  sportverein:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Startpasswort für den Benutzer "admin" (nur beim allerersten Start verwendet)
+      ADMIN_PASSWORD: "bitte-aendern"
+      # Beispieldaten beim ersten Start laden (0 = leerer Verein)
+      SEED_DEMO: "1"
+      # Hinter einem HTTPS-Reverse-Proxy (Caddy, nginx, Traefik) auf "1" setzen
+      TRUST_PROXY: "0"
+    volumes:
+      - sportverein-daten:/data
+
+volumes:
+  sportverein-daten:
