@@ -1,0 +1,15 @@
+{
+  "name": "Sportverein – Vereinsverwaltung",
+  "short_name": "Sportverein",
+  "description": "Mannschaften, Sportplätze, Hallen, Sportheim und Vereinskalender verwalten",
+  "lang": "de",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f5f7",
+  "theme_color": "#15803d",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
